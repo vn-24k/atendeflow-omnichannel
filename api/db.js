@@ -658,6 +658,36 @@ export function updateConversationStatus(id, status) {
   return getConversationById(id);
 }
 
+export function updateConversationKanbanStage(id, stage) {
+  const validStages = ['new', 'in_progress', 'waiting_client', 'resolved'];
+  if (!validStages.includes(stage)) {
+    const err = new Error(`Estágio Kanban inválido: "${stage}". Aceitos: ${validStages.join(', ')}.`);
+    err.code = 'INVALID_STAGE';
+    throw err;
+  }
+
+  const conv = db.prepare('SELECT id FROM conversations WHERE id = ?').get(id);
+  if (!conv) {
+    return null;
+  }
+
+  let mappedStatus = 'open';
+  if (stage === 'waiting_client') mappedStatus = 'pending';
+  if (stage === 'resolved') mappedStatus = 'resolved';
+
+  db.prepare(`
+    UPDATE conversations
+    SET status = ?, updated_at = 'Agora mesmo'
+    WHERE id = ?
+  `).run(mappedStatus, id);
+
+  const updated = getConversationById(id);
+  if (updated) {
+    updated.kanbanStage = stage;
+  }
+  return updated;
+}
+
 export function updateConversationAssignee(id, agentId) {
   const conv = db.prepare('SELECT id FROM conversations WHERE id = ?').get(id);
   if (!conv) {

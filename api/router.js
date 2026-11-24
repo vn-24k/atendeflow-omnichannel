@@ -157,6 +157,25 @@ export async function handleApiRequest(req, res) {
       }
     }
 
+    // 5.1 PATCH /api/conversations/:id/kanban-stage
+    const kanbanMatch = pathname.match(/^\/api\/conversations\/([A-Za-z0-9_-]+)\/kanban-stage$/);
+    if (method === 'PATCH' && kanbanMatch) {
+      const convId = kanbanMatch[1];
+      const body = await parseBody(req);
+      if (!body.stage) {
+        return sendJson(res, 400, { success: false, error: 'stage é obrigatório.' });
+      }
+      try {
+        const updated = db.updateConversationKanbanStage(convId, body.stage);
+        if (!updated) {
+          return sendJson(res, 404, { success: false, error: 'Conversa não encontrada.' });
+        }
+        return sendJson(res, 200, { success: true, data: updated });
+      } catch (err) {
+        return sendJson(res, 400, { success: false, error: err.message });
+      }
+    }
+
     // 6. PATCH /api/conversations/:id/assign
     const assignMatch = pathname.match(/^\/api\/conversations\/([A-Za-z0-9_-]+)\/assign$/);
     if (method === 'PATCH' && assignMatch) {

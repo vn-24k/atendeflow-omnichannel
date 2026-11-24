@@ -97,6 +97,36 @@ export const api = {
     return res.data;
   },
 
+  // Atualizar Estágio Kanban do Ticket
+  async updateKanbanStage(ticketId: string, stage: string): Promise<Ticket> {
+    const res = await request<{ success: boolean; data: Ticket }>(
+      `/conversations/${ticketId}/kanban-stage`,
+      {
+        method: 'PATCH',
+        body: JSON.stringify({ stage }),
+      }
+    );
+    return res.data;
+  },
+
+  // Disparo de mensagem WhatsApp diretamente via Webhook (porta 5005 Bridge)
+  async sendWebhookWhatsApp(payload: { from?: string; phone?: string; name: string; text: string }): Promise<any> {
+    return request('/webhooks/whatsapp', {
+      method: 'POST',
+      body: JSON.stringify({
+        phone: payload.phone || payload.from || '5511999887766',
+        name: payload.name,
+        message: payload.text,
+      }),
+    });
+  },
+
+  // Listar Contatos do CRM
+  async getContacts(): Promise<Contact[]> {
+    const res = await request<{ success: boolean; data: Contact[] }>('/contacts');
+    return res.data;
+  },
+
   // Atribuir Agente Responsável
   async assignAgent(ticketId: string, agentId: string): Promise<Ticket> {
     const res = await request<{ success: boolean; data: Ticket }>(

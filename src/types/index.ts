@@ -2,6 +2,8 @@ export type Channel = 'whatsapp' | 'webchat' | 'instagram' | 'email';
 
 export type TicketStatus = 'open' | 'pending' | 'resolved';
 
+export type KanbanStage = 'new' | 'in_progress' | 'waiting_client' | 'resolved';
+
 export type Priority = 'urgent' | 'high' | 'normal' | 'low';
 
 export interface Attachment {
@@ -19,6 +21,8 @@ export interface Message {
   content: string;
   timestamp: string;
   isInternalNote?: boolean;
+  mediaType?: 'text' | 'audio' | 'image' | 'file';
+  audioDuration?: number; // segundos
   attachment?: Attachment;
   status?: 'sent' | 'delivered' | 'read';
 }
@@ -52,6 +56,7 @@ export interface Ticket {
   contact: Contact;
   channel: Channel;
   status: TicketStatus;
+  kanbanStage?: KanbanStage;
   priority: Priority;
   subject: string;
   assignedAgent: Agent;
@@ -81,4 +86,31 @@ export interface KnowledgeArticle {
   views: number;
   helpfulCount: number;
   updatedAt: string;
+}
+
+export interface ChannelStatus {
+  id: string;
+  name: string;
+  channel: Channel;
+  status: 'connected' | 'connecting' | 'disconnected';
+  endpoint: string;
+  port?: number;
+  lastSync: string;
+  qrCode?: string;
+  messagesReceivedToday: number;
+  messagesSentToday: number;
+}
+
+export interface AutomationRule {
+  id: string;
+  title: string;
+  description: string;
+  trigger: 'message_received' | 'ticket_created' | 'after_hours' | 'unassigned_sla';
+  isActive: boolean;
+  actionType: 'send_menu' | 'auto_reply' | 'assign_round_robin' | 'tag_vip';
+  config: {
+    menuOptions?: { key: string; label: string; department: string }[];
+    autoReplyText?: string;
+    slaMinutes?: number;
+  };
 }

@@ -1,13 +1,18 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { Header } from './components/Header';
+import { AppNavigation, ActiveModule } from './components/AppNavigation';
 import { SidebarConversations } from './components/SidebarConversations';
 import { ChatArea } from './components/ChatArea';
 import { ContactCRM } from './components/ContactCRM';
+import { KanbanBoard } from './components/KanbanBoard';
+import { ChannelsManager } from './components/ChannelsManager';
+import { AutomationsManager } from './components/AutomationsManager';
+import { ContactsCRMView } from './components/ContactsCRMView';
 import { KnowledgeBase } from './components/KnowledgeBase';
 import { AnalyticsDashboard } from './components/AnalyticsDashboard';
+import { MobileSimulatorModal } from './components/MobileSimulatorModal';
 import { LiveClientWidget } from './components/LiveClientWidget';
 
-import { Ticket, Message, Agent, Channel, CannedResponse, KnowledgeArticle } from './types';
+import { Ticket, Message, Agent, Channel, CannedResponse, KnowledgeArticle, Contact, KanbanStage } from './types';
 import { api } from './services/api';
 
 const DEFAULT_AGENT: Agent = {
@@ -19,8 +24,9 @@ const DEFAULT_AGENT: Agent = {
 };
 
 export default function App() {
-  const [currentTab, setCurrentTab] = useState<'inbox' | 'knowledge' | 'analytics'>('inbox');
+  const [activeModule, setActiveModule] = useState<ActiveModule>('inbox');
   const [tickets, setTickets] = useState<Ticket[]>([]);
+  const [contacts, setContacts] = useState<Contact[]>([]);
   const [messagesMap, setMessagesMap] = useState<Record<string, Message[]>>({});
   const [selectedTicketId, setSelectedTicketId] = useState<string | null>(null);
   const [currentAgent, setCurrentAgent] = useState<Agent>(DEFAULT_AGENT);
@@ -29,7 +35,9 @@ export default function App() {
   const [knowledgeArticles, setKnowledgeArticles] = useState<KnowledgeArticle[]>([]);
   const [analyticsData, setAnalyticsData] = useState<any>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [isSimulatorOpen, setIsSimulatorOpen] = useState(false);
   const [isWidgetOpen, setIsWidgetOpen] = useState(false);
+  const [whatsappConnected, setWhatsappConnected] = useState(true);
 
   // Filters
   const [statusFilter, setStatusFilter] = useState<'all' | 'mine' | 'unassigned' | 'resolved'>('all');
@@ -69,17 +77,18 @@ export default function App() {
     }
   }, []);
 
-  // 3. Inicialização geral (equipe, respostas rápidas, base de conhecimento e analytics)
+  // 3. Inicialização geral (equipe, respostas rápidas, base de conhecimento, contatos e analytics)
   useEffect(() => {
     async function initData() {
       setIsLoading(true);
       try {
-        const [agents, canned, articles, analytics, initialConvs] = await Promise.all([
+        const [agents, canned, articles, analytics, initialConvs, contactsList] = await Promise.all([
           api.getAgents().catch(() => [DEFAULT_AGENT]),
           api.getCannedResponses().catch(() => []),
           api.getKnowledgeArticles().catch(() => []),
           api.getAnalytics().catch(() => null),
           api.getConversations().catch(() => []),
+          api.getContacts().catch(() => []),
         ]);
 
         if (agents && agents.length > 0) {
@@ -90,6 +99,7 @@ export default function App() {
         setKnowledgeArticles(articles);
         setAnalyticsData(analytics);
         setTickets(initialConvs);
+        setContacts(contactsList);
 
         if (initialConvs.length > 0) {
           const firstId = initialConvs[0].id;
@@ -120,11 +130,9 @@ export default function App() {
 
   // Polling contínuo em background (4s) para sincronização omnichannel em tempo real sem F5
   useEffect(() => {
-    if (currentTab !== 'inbox') return;
-
     const interval = setInterval(async () => {
       try {
-        const [updatedConvs, currentFullTicket, updatedAnalytics] = await Promise.all([
+        const [updatedConvs, currentFullTicket, updatedAnalytics, updatedContacts] = await Promise.all([
           api.getConversations({
             status: statusFilter,
             channel: channelFilter,
@@ -133,10 +141,12 @@ export default function App() {
           }),
           selectedTicketId ? api.getConversationById(selectedTicketId).catch(() => null) : null,
           api.getAnalytics().catch(() => null),
+          api.getContacts().catch(() => []),
         ]);
 
         setTickets(updatedConvs);
         if (updatedAnalytics) setAnalyticsData(updatedAnalytics);
+        if (updatedContacts.length > 0) setContacts(updatedContacts);
 
         if (currentFullTicket && selectedTicketId && Array.isArray(currentFullTicket.messages)) {
           setMessagesMap(prev => ({
@@ -145,42 +155,29 @@ export default function App() {
           }));
         }
       } catch {
-        // Silêncio em caso de oscilação transitória
+        // Silêncio em caso de oscilação momentânea
       }
     }, 4000);
 
     return () => clearInterval(interval);
-  }, [currentTab, statusFilter, channelFilter, searchQuery, currentAgent.id, selectedTicketId]);
+  }, [selectedTicketId, statusFilter, channelFilter, searchQuery, currentAgent.id]);
 
-  // Selected Ticket & Contact
   const selectedTicket = tickets.find(t => t.id === selectedTicketId) || null;
-  const currentMessages = selectedTicketId ? (messagesMap[selectedTicketId] || []) : [];
+  const currentMessages = selectedTicketId ? messagesMap[selectedTicketId] || [] : [];
 
-  // Toggle Agent Online/Busy/Away
-  const handleToggleAgentStatus = async () => {
-    const nextStatus = currentAgent.status === 'online' ? 'busy' : currentAgent.status === 'busy' ? 'away' : 'online';
-    try {
-      const updated = await api.updateAgentStatus(currentAgent.id, nextStatus);
-      setCurrentAgent(updated);
-      setTeamAgents(prev => prev.map(a => a.id === updated.id ? updated : a));
-    } catch {
-      setCurrentAgent(prev => ({ ...prev, status: nextStatus }));
-    }
-  };
-
-  // Enviar Mensagem Pública ou Nota Interna com persistência no SQLite
+  // Enviar Mensagem Pública ou Nota Interna
   const handleSendMessage = async (content: string, isInternal: boolean, attachment?: any) => {
     if (!selectedTicketId) return;
 
     try {
-      let savedMsg: Message;
+      let savedMessage: Message;
       if (isInternal) {
-        savedMsg = await api.sendInternalNote(selectedTicketId, {
+        savedMessage = await api.sendInternalNote(selectedTicketId, {
           content,
           senderName: currentAgent.name,
         });
       } else {
-        savedMsg = await api.sendMessage(selectedTicketId, {
+        savedMessage = await api.sendMessage(selectedTicketId, {
           content,
           senderName: currentAgent.name,
           attachment,
@@ -189,62 +186,79 @@ export default function App() {
 
       setMessagesMap(prev => ({
         ...prev,
-        [selectedTicketId]: [...(prev[selectedTicketId] || []), savedMsg],
+        [selectedTicketId]: [...(prev[selectedTicketId] || []), savedMessage],
       }));
 
-      // Atualiza o ticket na lista
       setTickets(prev => prev.map(t => {
         if (t.id === selectedTicketId) {
           return {
             ...t,
-            lastMessage: isInternal ? t.lastMessage : content,
-            lastMessageTime: savedMsg.timestamp,
-            unreadCount: 0,
-            updatedAt: 'Agora mesmo',
+            lastMessage: isInternal ? `[Nota Interna] ${content}` : content,
+            lastMessageTime: 'Agora mesmo',
           };
         }
         return t;
       }));
 
-      // Atualizar métricas do banco
       api.getAnalytics().then(setAnalyticsData).catch(() => {});
     } catch (err) {
-      console.error('Erro ao enviar mensagem para o banco:', err);
+      console.error('Falha ao enviar mensagem:', err);
     }
   };
 
-  // Atualizar Status do Ticket (Open, Pending, Resolved)
+  // Atualizar Status do Ticket
   const handleUpdateStatus = async (ticketId: string, status: Ticket['status']) => {
     try {
-      const updatedTicket = await api.updateTicketStatus(ticketId, status);
-      setTickets(prev => prev.map(t => t.id === ticketId ? { ...t, status: updatedTicket.status } : t));
+      const updated = await api.updateTicketStatus(ticketId, status);
+      setTickets(prev => prev.map(t => t.id === ticketId ? { ...t, status: updated.status } : t));
       api.getAnalytics().then(setAnalyticsData).catch(() => {});
     } catch (err) {
       console.error('Erro ao atualizar status na API:', err);
-      setTickets(prev => prev.map(t => t.id === ticketId ? { ...t, status } : t));
     }
   };
 
-  // Atribuir Agente Responsável
+  // Atualizar Estágio Kanban
+  const handleUpdateStage = async (ticketId: string, stage: KanbanStage) => {
+    try {
+      const updated = await api.updateKanbanStage(ticketId, stage);
+      setTickets(prev => prev.map(t => t.id === ticketId ? { ...t, kanbanStage: stage, status: updated.status } : t));
+      api.getAnalytics().then(setAnalyticsData).catch(() => {});
+    } catch (err) {
+      console.error('Erro ao atualizar estágio kanban na API:', err);
+    }
+  };
+
+  // Atribuir Agente
   const handleAssignAgent = async (ticketId: string, agent: Agent) => {
     try {
       const updated = await api.assignAgent(ticketId, agent.id);
       setTickets(prev => prev.map(t => t.id === ticketId ? { ...t, assignedAgent: updated.assignedAgent } : t));
     } catch (err) {
       console.error('Erro ao atribuir agente na API:', err);
-      setTickets(prev => prev.map(t => t.id === ticketId ? { ...t, assignedAgent: agent } : t));
     }
   };
 
-  // Atualizar Tags do Contato no SQLite
+  // Alternar Status do Operador
+  const handleToggleAgentStatus = async () => {
+    const nextStatus = currentAgent.status === 'online' ? 'busy' : currentAgent.status === 'busy' ? 'away' : 'online';
+    try {
+      const updated = await api.updateAgentStatus(currentAgent.id, nextStatus);
+      setCurrentAgent(prev => ({ ...prev, status: updated.status }));
+      setTeamAgents(prev => prev.map(a => a.id === currentAgent.id ? { ...a, status: updated.status } : a));
+    } catch (err) {
+      console.error('Erro ao alternar status do agente:', err);
+    }
+  };
+
+  // Atualizar Tags
   const handleUpdateTags = async (contactId: string, tags: string[]) => {
     try {
-      const updatedContact = await api.updateContact(contactId, { tags });
+      await api.updateContact(contactId, { tags });
       setTickets(prev => prev.map(t => {
         if (t.contact.id === contactId) {
           return {
             ...t,
-            contact: { ...t.contact, tags: updatedContact.tags },
+            contact: { ...t.contact, tags },
           };
         }
         return t;
@@ -254,7 +268,7 @@ export default function App() {
     }
   };
 
-  // Atualizar Notas Internas do Contato no SQLite
+  // Atualizar Notas Internas do Contato
   const handleUpdateNotes = async (contactId: string, notes: string) => {
     try {
       const updatedContact = await api.updateContact(contactId, { internalNotes: notes });
@@ -272,28 +286,14 @@ export default function App() {
     }
   };
 
-  // Disparo de mensagem externa via Webhook Real (WhatsApp Bridge / Widget)
-  const handleSimulateClientMessage = async (channel: Channel, clientName: string, text: string) => {
-    try {
-      const webhookResponse = await api.simulateClientMessage(channel, clientName, text);
-      const convId = webhookResponse?.result?.conversationId;
-
-      // Recarrega conversas do banco relacional
-      const updatedList = await api.getConversations();
-      setTickets(updatedList);
-
-      if (convId) {
-        setSelectedTicketId(convId);
-        await fetchSelectedTicketMessages(convId);
-      } else if (updatedList.length > 0) {
-        setSelectedTicketId(updatedList[0].id);
-        await fetchSelectedTicketMessages(updatedList[0].id);
-      }
-
-      setCurrentTab('inbox');
-      api.getAnalytics().then(setAnalyticsData).catch(() => {});
-    } catch (err) {
-      console.error('Erro ao simular webhook de cliente:', err);
+  // Abrir conversa a partir do CRM
+  const handleOpenConversationWithContact = (contactId: string) => {
+    const existing = tickets.find(t => t.contactId === contactId);
+    if (existing) {
+      setSelectedTicketId(existing.id);
+      setActiveModule('inbox');
+    } else {
+      setActiveModule('inbox');
     }
   };
 
@@ -307,77 +307,125 @@ export default function App() {
   };
 
   return (
-    <div className="min-h-screen bg-[#F8FAFC] flex flex-col font-sans">
-      {/* Top Main Navigation Header */}
-      <Header
-        currentTab={currentTab}
-        setCurrentTab={setCurrentTab}
+    <div className="h-screen w-screen bg-[#0F172A] flex overflow-hidden font-sans">
+      {/* 1. Barra Lateral de Navegação Master (Chatwoot / Linear Style) */}
+      <AppNavigation
+        activeModule={activeModule}
+        setActiveModule={setActiveModule}
         currentAgent={currentAgent}
         onToggleStatus={handleToggleAgentStatus}
-        unreadTotal={unreadTotal}
-        onOpenWidget={() => setIsWidgetOpen(true)}
-        isWidgetOpen={isWidgetOpen}
+        unreadCount={unreadTotal}
+        onOpenMobileSimulator={() => setIsSimulatorOpen(true)}
+        isSimulatorOpen={isSimulatorOpen}
+        whatsappConnected={whatsappConnected}
       />
 
-      {/* Main Content Areas */}
-      {currentTab === 'inbox' && (
-        <div className="flex-1 flex overflow-hidden">
-          {/* Column 1: Conversations Queue Sidebar */}
-          <SidebarConversations
+      {/* 2. Área Central Dinâmica por Módulo */}
+      <main className="flex-1 flex overflow-hidden bg-slate-50">
+        {/* Módulo 1: Inbox Omnichannel (3 Colunas) */}
+        {activeModule === 'inbox' && (
+          <div className="flex-1 flex overflow-hidden">
+            <SidebarConversations
+              tickets={tickets}
+              selectedTicketId={selectedTicketId}
+              onSelectTicket={(id) => {
+                setSelectedTicketId(id);
+                setTickets(prev => prev.map(t => t.id === id ? { ...t, unreadCount: 0 } : t));
+              }}
+              statusFilter={statusFilter}
+              setStatusFilter={setStatusFilter}
+              channelFilter={channelFilter}
+              setChannelFilter={setChannelFilter}
+              searchQuery={searchQuery}
+              setSearchQuery={setSearchQuery}
+              currentAgent={currentAgent}
+              ticketCounts={ticketCounts}
+            />
+
+            <ChatArea
+              ticket={selectedTicket}
+              messages={currentMessages}
+              onSendMessage={handleSendMessage}
+              onUpdateStatus={handleUpdateStatus}
+              onAssignAgent={handleAssignAgent}
+              cannedResponses={cannedResponses}
+              teamAgents={teamAgents}
+            />
+
+            <ContactCRM
+              contact={selectedTicket?.contact || null}
+              ticket={selectedTicket}
+              onUpdateTags={handleUpdateTags}
+              onUpdateNotes={handleUpdateNotes}
+            />
+          </div>
+        )}
+
+        {/* Módulo 2: Funil Kanban de Atendimento */}
+        {activeModule === 'kanban' && (
+          <KanbanBoard
             tickets={tickets}
-            selectedTicketId={selectedTicketId}
             onSelectTicket={(id) => {
               setSelectedTicketId(id);
-              // Limpar unread localmente
-              setTickets(prev => prev.map(t => t.id === id ? { ...t, unreadCount: 0 } : t));
+              setActiveModule('inbox');
             }}
-            statusFilter={statusFilter}
-            setStatusFilter={setStatusFilter}
-            channelFilter={channelFilter}
-            setChannelFilter={setChannelFilter}
-            searchQuery={searchQuery}
-            setSearchQuery={setSearchQuery}
-            currentAgent={currentAgent}
-            ticketCounts={ticketCounts}
+            onUpdateStage={handleUpdateStage}
+            onOpenMobileSimulator={() => setIsSimulatorOpen(true)}
           />
+        )}
 
-          {/* Column 2: Central Chat & Timeline Area */}
-          <ChatArea
-            ticket={selectedTicket}
-            messages={currentMessages}
-            onSendMessage={handleSendMessage}
-            onUpdateStatus={handleUpdateStatus}
-            onAssignAgent={handleAssignAgent}
-            cannedResponses={cannedResponses}
-            teamAgents={teamAgents}
+        {/* Módulo 3: Canais & WhatsApp Bridge (Porta 5005) */}
+        {activeModule === 'channels' && (
+          <ChannelsManager
+            whatsappConnected={whatsappConnected}
+            onToggleWhatsApp={setWhatsappConnected}
+            onOpenMobileSimulator={() => setIsSimulatorOpen(true)}
           />
+        )}
 
-          {/* Column 3: Contact CRM Profile Sidebar */}
-          <ContactCRM
-            contact={selectedTicket?.contact || null}
-            ticket={selectedTicket}
-            onUpdateTags={handleUpdateTags}
-            onUpdateNotes={handleUpdateNotes}
+        {/* Módulo 4: Robô de Triagem & Automações */}
+        {activeModule === 'automations' && (
+          <AutomationsManager />
+        )}
+
+        {/* Módulo 5: CRM & Diretório de Contatos */}
+        {activeModule === 'contacts' && (
+          <ContactsCRMView
+            contacts={contacts}
+            tickets={tickets}
+            onOpenConversationWithContact={handleOpenConversationWithContact}
           />
-        </div>
-      )}
+        )}
 
-      {currentTab === 'knowledge' && (
-        <KnowledgeBase
-          articles={knowledgeArticles}
-          onOpenWidget={() => setIsWidgetOpen(true)}
-        />
-      )}
+        {/* Módulo 6: Base de Ajuda */}
+        {activeModule === 'knowledge' && (
+          <KnowledgeBase
+            articles={knowledgeArticles}
+            onOpenWidget={() => setIsWidgetOpen(true)}
+          />
+        )}
 
-      {currentTab === 'analytics' && (
-        <AnalyticsDashboard tickets={tickets} analytics={analyticsData} />
-      )}
+        {/* Módulo 7: Métricas & SLA */}
+        {activeModule === 'analytics' && (
+          <AnalyticsDashboard tickets={tickets} analytics={analyticsData} />
+        )}
+      </main>
 
-      {/* Interactive Floating Live Client Widget */}
+      {/* Simulador de Smartphone WhatsApp (Interativo e Realista) */}
+      <MobileSimulatorModal
+        isOpen={isSimulatorOpen}
+        onClose={() => setIsSimulatorOpen(false)}
+        onMessageSent={fetchConversations}
+      />
+
+      {/* Widget Flutuante para Web */}
       <LiveClientWidget
         isOpen={isWidgetOpen}
         onClose={() => setIsWidgetOpen(false)}
-        onSimulateMessage={handleSimulateClientMessage}
+        onSimulateMessage={async (channel, name, text) => {
+          await api.simulateClientMessage(channel, name, text);
+          fetchConversations();
+        }}
       />
     </div>
   );

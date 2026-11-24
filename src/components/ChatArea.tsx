@@ -293,7 +293,41 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
                       : 'bg-white border border-slate-200/80 text-slate-900 rounded-tl-xs'
                   }`}
                 >
-                  <p className="whitespace-pre-wrap">{msg.content}</p>
+                  {/* Audio Player if message is audio */}
+                  {(msg.mediaType === 'audio' || msg.content.includes('🎤') || msg.content.includes('Mensagem de Voz')) ? (
+                    <div className="flex items-center gap-3 py-1">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const audio = new Audio('https://actions.google.com/sounds/v1/cartoon/pop.ogg');
+                          audio.play().catch(() => {});
+                        }}
+                        className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 ${
+                          isAgent ? 'bg-white text-indigo-700 shadow-sm' : 'bg-indigo-600 text-white'
+                        }`}
+                        title="Tocar áudio decupado"
+                      >
+                        ▶
+                      </button>
+                      <div className="flex-1">
+                        <div className="flex items-center gap-0.5 h-4">
+                          {[3, 6, 9, 12, 8, 4, 10, 14, 11, 7, 5, 12, 9, 3, 7, 11, 6].map((h, i) => (
+                            <span
+                              key={i}
+                              style={{ height: `${h}px` }}
+                              className={`w-1 rounded-full ${isAgent ? 'bg-white/70' : 'bg-indigo-400'}`}
+                            />
+                          ))}
+                        </div>
+                        <div className="flex justify-between items-center text-[10px] opacity-80 mt-1">
+                          <span className="font-mono">0:14</span>
+                          <span className="text-[9px] uppercase font-bold tracking-wider">Voz Humana</span>
+                        </div>
+                      </div>
+                    </div>
+                  ) : (
+                    <p className="whitespace-pre-wrap">{msg.content}</p>
+                  )}
 
                   {/* Attachment Card if present */}
                   {msg.attachment && (
@@ -418,9 +452,9 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
             className="w-full bg-transparent p-3 text-xs text-slate-900 placeholder:text-slate-400 resize-none focus:outline-none"
           />
 
-          {/* Bottom Bar: Attachments & Send */}
+          {/* Bottom Bar: Attachments, Audio & Send */}
           <div className="px-3 pb-2.5 flex items-center justify-between">
-            <div className="flex items-center gap-1 text-slate-400">
+            <div className="flex items-center gap-1.5 text-slate-400">
               <button
                 onClick={handleSimulateAttachment}
                 className="p-1.5 rounded-lg hover:text-slate-700 hover:bg-slate-100 transition-colors"
@@ -428,6 +462,31 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
               >
                 <Paperclip className="w-4 h-4" />
               </button>
+              
+              {/* Botão de Envio de Áudio */}
+              <button
+                type="button"
+                onClick={() => {
+                  onSendMessage('🎤 Mensagem de Voz (0:18) — Áudio enviado pelo operador', isInternalNote);
+                }}
+                className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-emerald-50 text-emerald-700 hover:bg-emerald-100 text-[11px] font-bold transition-colors border border-emerald-200"
+                title="Enviar Áudio de Voz Decupado"
+              >
+                <span>🎤 Gravar Áudio</span>
+              </button>
+
+              {/* Botão de Template Interativo WhatsApp */}
+              <button
+                type="button"
+                onClick={() => {
+                  setInputText('✅ Seu agendamento foi confirmado para amanhã às 14:30. Caso precise remarcar, responda com 1.');
+                }}
+                className="hidden sm:flex items-center gap-1 px-2.5 py-1 rounded-lg bg-indigo-50 text-indigo-700 hover:bg-indigo-100 text-[11px] font-bold transition-colors border border-indigo-200"
+                title="Inserir modelo de confirmação do WhatsApp"
+              >
+                <span>⚡ Template Whats</span>
+              </button>
+
               <button
                 onClick={() => setInputText(prev => prev + ' 👍 ')}
                 className="p-1.5 rounded-lg hover:text-slate-700 hover:bg-slate-100 transition-colors"
