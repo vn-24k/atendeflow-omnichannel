@@ -25,6 +25,7 @@ const DEFAULT_AGENT: Agent = {
 
 export default function App() {
   const [activeModule, setActiveModule] = useState<ActiveModule>('inbox');
+  const [mobilePane, setMobilePane] = useState<'list' | 'chat'>('list');
   const [tickets, setTickets] = useState<Ticket[]>([]);
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [messagesMap, setMessagesMap] = useState<Record<string, Message[]>>({});
@@ -292,8 +293,10 @@ export default function App() {
     if (existing) {
       setSelectedTicketId(existing.id);
       setActiveModule('inbox');
+      setMobilePane('chat');
     } else {
       setActiveModule('inbox');
+      setMobilePane('list');
     }
   };
 
@@ -322,35 +325,41 @@ export default function App() {
 
       {/* 2. Área Central Dinâmica por Módulo */}
       <main className="flex-1 flex overflow-hidden bg-slate-50">
-        {/* Módulo 1: Inbox Omnichannel (3 Colunas) */}
+        {/* Módulo 1: Inbox Omnichannel (3 Colunas com alternância mobile inteligente) */}
         {activeModule === 'inbox' && (
           <div className="flex-1 flex overflow-hidden">
-            <SidebarConversations
-              tickets={tickets}
-              selectedTicketId={selectedTicketId}
-              onSelectTicket={(id) => {
-                setSelectedTicketId(id);
-                setTickets(prev => prev.map(t => t.id === id ? { ...t, unreadCount: 0 } : t));
-              }}
-              statusFilter={statusFilter}
-              setStatusFilter={setStatusFilter}
-              channelFilter={channelFilter}
-              setChannelFilter={setChannelFilter}
-              searchQuery={searchQuery}
-              setSearchQuery={setSearchQuery}
-              currentAgent={currentAgent}
-              ticketCounts={ticketCounts}
-            />
+            <div className={`h-full ${mobilePane === 'chat' ? 'hidden md:flex' : 'flex w-full md:w-auto'}`}>
+              <SidebarConversations
+                tickets={tickets}
+                selectedTicketId={selectedTicketId}
+                onSelectTicket={(id) => {
+                  setSelectedTicketId(id);
+                  setTickets(prev => prev.map(t => t.id === id ? { ...t, unreadCount: 0 } : t));
+                  setMobilePane('chat');
+                }}
+                statusFilter={statusFilter}
+                setStatusFilter={setStatusFilter}
+                channelFilter={channelFilter}
+                setChannelFilter={setChannelFilter}
+                searchQuery={searchQuery}
+                setSearchQuery={setSearchQuery}
+                currentAgent={currentAgent}
+                ticketCounts={ticketCounts}
+              />
+            </div>
 
-            <ChatArea
-              ticket={selectedTicket}
-              messages={currentMessages}
-              onSendMessage={handleSendMessage}
-              onUpdateStatus={handleUpdateStatus}
-              onAssignAgent={handleAssignAgent}
-              cannedResponses={cannedResponses}
-              teamAgents={teamAgents}
-            />
+            <div className={`h-full flex-1 ${mobilePane === 'list' ? 'hidden md:flex' : 'flex'}`}>
+              <ChatArea
+                ticket={selectedTicket}
+                messages={currentMessages}
+                onSendMessage={handleSendMessage}
+                onUpdateStatus={handleUpdateStatus}
+                onAssignAgent={handleAssignAgent}
+                cannedResponses={cannedResponses}
+                teamAgents={teamAgents}
+                onBackToList={() => setMobilePane('list')}
+              />
+            </div>
 
             <ContactCRM
               contact={selectedTicket?.contact || null}
@@ -368,6 +377,7 @@ export default function App() {
             onSelectTicket={(id) => {
               setSelectedTicketId(id);
               setActiveModule('inbox');
+              setMobilePane('chat');
             }}
             onUpdateStage={handleUpdateStage}
             onOpenMobileSimulator={() => setIsSimulatorOpen(true)}

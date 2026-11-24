@@ -86,7 +86,7 @@ export const SidebarConversations: React.FC<SidebarConversationsProps> = ({
   };
 
   return (
-    <aside className="w-full md:w-80 lg:w-96 bg-white border-r border-slate-200 flex flex-col h-[calc(100vh-4rem)] select-none">
+    <aside className="w-full md:w-80 lg:w-96 bg-white border-r border-slate-200 flex flex-col h-full select-none shrink-0">
       {/* Top Search & Filter Bar */}
       <div className="p-3 border-b border-slate-200 space-y-2.5">
         <div className="relative">

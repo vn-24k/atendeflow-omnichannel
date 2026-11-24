@@ -92,13 +92,13 @@ export const AppNavigation: React.FC<AppNavigationProps> = ({
   ];
 
   return (
-    <aside className="w-18 md:w-64 bg-slate-950 text-slate-300 flex flex-col justify-between border-r border-slate-800/80 shrink-0 select-none z-40 transition-all duration-200">
+    <aside className="w-14 sm:w-16 md:w-64 bg-slate-950 text-slate-300 flex flex-col justify-between border-r border-slate-800/80 shrink-0 select-none z-40 transition-all duration-200">
       {/* Top Header & Brand */}
       <div>
-        <div className="h-16 px-4 flex items-center justify-between border-b border-slate-800/80">
+        <div className="h-16 px-2 md:px-4 flex items-center justify-center md:justify-between border-b border-slate-800/80">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-indigo-600 to-indigo-500 flex items-center justify-center text-white shadow-lg shadow-indigo-500/25 ring-1 ring-white/20">
-              <MessageSquare className="w-5 h-5" />
+            <div className="w-9 h-9 md:w-10 md:h-10 rounded-xl bg-gradient-to-tr from-indigo-600 to-indigo-500 flex items-center justify-center text-white shadow-lg shadow-indigo-500/25 ring-1 ring-white/20">
+              <MessageSquare className="w-4 h-4 md:w-5 md:h-5" />
             </div>
             <div className="hidden md:block">
               <div className="flex items-center gap-2">
@@ -140,7 +140,7 @@ export const AppNavigation: React.FC<AppNavigationProps> = ({
               <button
                 key={item.id}
                 onClick={() => setActiveModule(item.id)}
-                className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-semibold transition-all group relative ${
+                className={`w-full flex items-center justify-center md:justify-start gap-3 p-2.5 md:px-3 md:py-2.5 rounded-xl text-xs font-semibold transition-all group relative ${
                   isActive
                     ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/30'
                     : 'text-slate-400 hover:text-slate-100 hover:bg-slate-900'

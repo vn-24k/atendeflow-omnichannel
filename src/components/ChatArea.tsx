@@ -19,7 +19,8 @@ import {
   Clock,
   Sparkles,
   PhoneCall,
-  UserCheck
+  UserCheck,
+  ArrowLeft
 } from 'lucide-react';
 import { Ticket, Message, CannedResponse, Agent, Channel } from '../types';
 
@@ -31,6 +32,7 @@ interface ChatAreaProps {
   onAssignAgent: (ticketId: string, agent: Agent) => void;
   cannedResponses: CannedResponse[];
   teamAgents: Agent[];
+  onBackToList?: () => void;
 }
 
 export const ChatArea: React.FC<ChatAreaProps> = ({
@@ -41,6 +43,7 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
   onAssignAgent,
   cannedResponses,
   teamAgents,
+  onBackToList,
 }) => {
   const [inputText, setInputText] = useState('');
   const [isInternalNote, setIsInternalNote] = useState(false);
@@ -111,10 +114,19 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
   };
 
   return (
-    <main className="flex-1 bg-[#F8FAFC] flex flex-col h-[calc(100vh-4rem)] overflow-hidden">
+    <main className="flex-1 bg-[#F8FAFC] flex flex-col h-full overflow-hidden">
       {/* Top Header of Active Ticket */}
-      <div className="h-16 bg-white border-b border-slate-200 px-4 md:px-6 flex items-center justify-between shrink-0 select-none">
-        <div className="flex items-center gap-3 min-w-0">
+      <div className="h-16 bg-white border-b border-slate-200 px-3 md:px-6 flex items-center justify-between shrink-0 select-none">
+        <div className="flex items-center gap-2 md:gap-3 min-w-0">
+          {onBackToList && (
+            <button
+              onClick={onBackToList}
+              className="md:hidden p-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 transition-colors shrink-0"
+              title="Voltar para a lista de conversas"
+            >
+              <ArrowLeft className="w-4 h-4" />
+            </button>
+          )}
           <div className="relative shrink-0">
             <img
               src={ticket.contact.avatar}

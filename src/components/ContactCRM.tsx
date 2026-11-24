@@ -64,7 +64,7 @@ export const ContactCRM: React.FC<ContactCRMProps> = ({
   const cleanPhone = contact.phone.replace(/\D/g, '');
 
   return (
-    <aside className="w-80 lg:w-88 bg-white border-l border-slate-200 h-[calc(100vh-4rem)] overflow-y-auto hidden xl:flex flex-col select-none">
+    <aside className="w-80 lg:w-88 bg-white border-l border-slate-200 h-full overflow-y-auto hidden xl:flex flex-col select-none shrink-0">
       {/* Profile Header */}
       <div className="p-6 text-center border-b border-slate-100 bg-gradient-to-b from-slate-50/70 to-white">
         <img
