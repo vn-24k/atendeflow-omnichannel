@@ -6,6 +6,18 @@ export default defineConfig({
   plugins: [
     react(),
     tailwindcss(),
+    {
+      name: 'atendeflow-api',
+      configureServer(server) {
+        server.middlewares.use(async (req, res, next) => {
+          if (req.url && req.url.startsWith('/api/')) {
+            const { handleApiRequest } = await import('./api/router.js');
+            return handleApiRequest(req, res);
+          }
+          next();
+        });
+      },
+    },
   ],
   server: {
     host: '0.0.0.0',

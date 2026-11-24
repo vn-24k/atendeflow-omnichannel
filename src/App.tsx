@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { Header } from './components/Header';
 import { SidebarConversations } from './components/SidebarConversations';
 import { ChatArea } from './components/ChatArea';
@@ -7,23 +7,28 @@ import { KnowledgeBase } from './components/KnowledgeBase';
 import { AnalyticsDashboard } from './components/AnalyticsDashboard';
 import { LiveClientWidget } from './components/LiveClientWidget';
 
-import { 
-  INITIAL_TICKETS, 
-  INITIAL_MESSAGES, 
-  CURRENT_AGENT, 
-  TEAM_AGENTS, 
-  CANNED_RESPONSES, 
-  KNOWLEDGE_ARTICLES,
-  INITIAL_CONTACTS
-} from './data/mockData';
-import { Ticket, Message, Agent, Channel, Contact } from './types';
+import { Ticket, Message, Agent, Channel, CannedResponse, KnowledgeArticle } from './types';
+import { api } from './services/api';
+
+const DEFAULT_AGENT: Agent = {
+  id: 'agent-1',
+  name: 'Vinícius Caetano',
+  avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=150&q=80',
+  role: 'Supervisor de Operações',
+  status: 'online',
+};
 
 export default function App() {
   const [currentTab, setCurrentTab] = useState<'inbox' | 'knowledge' | 'analytics'>('inbox');
-  const [tickets, setTickets] = useState<Ticket[]>(INITIAL_TICKETS);
-  const [messagesMap, setMessagesMap] = useState<Record<string, Message[]>>(INITIAL_MESSAGES);
-  const [selectedTicketId, setSelectedTicketId] = useState<string | null>('TCK-1042');
-  const [currentAgent, setCurrentAgent] = useState<Agent>(CURRENT_AGENT);
+  const [tickets, setTickets] = useState<Ticket[]>([]);
+  const [messagesMap, setMessagesMap] = useState<Record<string, Message[]>>({});
+  const [selectedTicketId, setSelectedTicketId] = useState<string | null>(null);
+  const [currentAgent, setCurrentAgent] = useState<Agent>(DEFAULT_AGENT);
+  const [teamAgents, setTeamAgents] = useState<Agent[]>([DEFAULT_AGENT]);
+  const [cannedResponses, setCannedResponses] = useState<CannedResponse[]>([]);
+  const [knowledgeArticles, setKnowledgeArticles] = useState<KnowledgeArticle[]>([]);
+  const [analyticsData, setAnalyticsData] = useState<any>(null);
+  const [isLoading, setIsLoading] = useState(true);
   const [isWidgetOpen, setIsWidgetOpen] = useState(false);
 
   // Filters
@@ -31,183 +36,232 @@ export default function App() {
   const [channelFilter, setChannelFilter] = useState<Channel | 'all'>('all');
   const [searchQuery, setSearchQuery] = useState('');
 
+  // 1. Carregar lista de conversas da API do Backend
+  const fetchConversations = useCallback(async () => {
+    try {
+      const data = await api.getConversations({
+        status: statusFilter,
+        channel: channelFilter,
+        search: searchQuery,
+        agentId: currentAgent.id,
+      });
+      setTickets(data);
+      if (!selectedTicketId && data.length > 0) {
+        setSelectedTicketId(data[0].id);
+      }
+    } catch (err) {
+      console.error('Falha ao buscar conversas da API:', err);
+    }
+  }, [statusFilter, channelFilter, searchQuery, currentAgent.id, selectedTicketId]);
+
+  // 2. Carregar mensagens da conversa selecionada
+  const fetchSelectedTicketMessages = useCallback(async (ticketId: string) => {
+    try {
+      const fullTicket = await api.getConversationById(ticketId);
+      if (fullTicket && Array.isArray(fullTicket.messages)) {
+        setMessagesMap(prev => ({
+          ...prev,
+          [ticketId]: fullTicket.messages,
+        }));
+      }
+    } catch (err) {
+      console.error(`Falha ao buscar mensagens do ticket ${ticketId}:`, err);
+    }
+  }, []);
+
+  // 3. Inicialização geral (equipe, respostas rápidas, base de conhecimento e analytics)
+  useEffect(() => {
+    async function initData() {
+      setIsLoading(true);
+      try {
+        const [agents, canned, articles, analytics, initialConvs] = await Promise.all([
+          api.getAgents().catch(() => [DEFAULT_AGENT]),
+          api.getCannedResponses().catch(() => []),
+          api.getKnowledgeArticles().catch(() => []),
+          api.getAnalytics().catch(() => null),
+          api.getConversations().catch(() => []),
+        ]);
+
+        if (agents && agents.length > 0) {
+          setTeamAgents(agents);
+          setCurrentAgent(agents[0]);
+        }
+        setCannedResponses(canned);
+        setKnowledgeArticles(articles);
+        setAnalyticsData(analytics);
+        setTickets(initialConvs);
+
+        if (initialConvs.length > 0) {
+          const firstId = initialConvs[0].id;
+          setSelectedTicketId(firstId);
+          await fetchSelectedTicketMessages(firstId);
+        }
+      } catch (err) {
+        console.error('Erro na inicialização da API:', err);
+      } finally {
+        setIsLoading(false);
+      }
+    }
+
+    initData();
+  }, [fetchSelectedTicketMessages]);
+
+  // Atualizar conversas quando filtros mudarem
+  useEffect(() => {
+    fetchConversations();
+  }, [fetchConversations]);
+
+  // Atualizar mensagens quando selecionar outro ticket
+  useEffect(() => {
+    if (selectedTicketId) {
+      fetchSelectedTicketMessages(selectedTicketId);
+    }
+  }, [selectedTicketId, fetchSelectedTicketMessages]);
+
   // Selected Ticket & Contact
   const selectedTicket = tickets.find(t => t.id === selectedTicketId) || null;
   const currentMessages = selectedTicketId ? (messagesMap[selectedTicketId] || []) : [];
 
   // Toggle Agent Online/Busy/Away
-  const handleToggleAgentStatus = () => {
-    setCurrentAgent(prev => {
-      const nextStatus = prev.status === 'online' ? 'busy' : prev.status === 'busy' ? 'away' : 'online';
-      return { ...prev, status: nextStatus };
-    });
+  const handleToggleAgentStatus = async () => {
+    const nextStatus = currentAgent.status === 'online' ? 'busy' : currentAgent.status === 'busy' ? 'away' : 'online';
+    try {
+      const updated = await api.updateAgentStatus(currentAgent.id, nextStatus);
+      setCurrentAgent(updated);
+      setTeamAgents(prev => prev.map(a => a.id === updated.id ? updated : a));
+    } catch {
+      setCurrentAgent(prev => ({ ...prev, status: nextStatus }));
+    }
   };
 
-  // Send Message (Public or Internal Note)
-  const handleSendMessage = (content: string, isInternal: boolean, attachment?: any) => {
+  // Enviar Mensagem Pública ou Nota Interna com persistência no SQLite
+  const handleSendMessage = async (content: string, isInternal: boolean, attachment?: any) => {
     if (!selectedTicketId) return;
 
-    const now = new Date();
-    const timeStr = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+    try {
+      let savedMsg: Message;
+      if (isInternal) {
+        savedMsg = await api.sendInternalNote(selectedTicketId, {
+          content,
+          senderName: currentAgent.name,
+        });
+      } else {
+        savedMsg = await api.sendMessage(selectedTicketId, {
+          content,
+          senderName: currentAgent.name,
+          attachment,
+        });
+      }
 
-    const newMsg: Message = {
-      id: `m-${Date.now()}`,
-      ticketId: selectedTicketId,
-      sender: 'agent',
-      senderName: currentAgent.name,
-      content,
-      timestamp: timeStr,
-      isInternalNote: isInternal,
-      attachment,
-      status: 'delivered',
-    };
+      setMessagesMap(prev => ({
+        ...prev,
+        [selectedTicketId]: [...(prev[selectedTicketId] || []), savedMsg],
+      }));
 
-    setMessagesMap(prev => ({
-      ...prev,
-      [selectedTicketId]: [...(prev[selectedTicketId] || []), newMsg],
-    }));
-
-    // If it's a public response, update ticket last message
-    if (!isInternal) {
+      // Atualiza o ticket na lista
       setTickets(prev => prev.map(t => {
         if (t.id === selectedTicketId) {
           return {
             ...t,
-            lastMessage: content,
-            lastMessageTime: timeStr,
+            lastMessage: isInternal ? t.lastMessage : content,
+            lastMessageTime: savedMsg.timestamp,
             unreadCount: 0,
             updatedAt: 'Agora mesmo',
           };
         }
         return t;
       }));
+
+      // Atualizar métricas do banco
+      api.getAnalytics().then(setAnalyticsData).catch(() => {});
+    } catch (err) {
+      console.error('Erro ao enviar mensagem para o banco:', err);
     }
   };
 
-  // Update Ticket Status (Open, Pending, Resolved)
-  const handleUpdateStatus = (ticketId: string, status: Ticket['status']) => {
-    setTickets(prev => prev.map(t => {
-      if (t.id === ticketId) {
-        return { ...t, status };
-      }
-      return t;
-    }));
-  };
-
-  // Assign Ticket to Team Agent
-  const handleAssignAgent = (ticketId: string, agent: Agent) => {
-    setTickets(prev => prev.map(t => {
-      if (t.id === ticketId) {
-        return { ...t, assignedAgent: agent };
-      }
-      return t;
-    }));
-  };
-
-  // Update Contact Tags
-  const handleUpdateTags = (contactId: string, tags: string[]) => {
-    setTickets(prev => prev.map(t => {
-      if (t.contact.id === contactId) {
-        return {
-          ...t,
-          contact: { ...t.contact, tags },
-        };
-      }
-      return t;
-    }));
-  };
-
-  // Update Contact Notes
-  const handleUpdateNotes = (contactId: string, notes: string) => {
-    setTickets(prev => prev.map(t => {
-      if (t.contact.id === contactId) {
-        return {
-          ...t,
-          contact: { ...t.contact, internalNotes: notes },
-        };
-      }
-      return t;
-    }));
-  };
-
-  // Simulate incoming ticket from Client Widget
-  const handleSimulateClientMessage = (channel: Channel, clientName: string, text: string) => {
-    const newTicketId = `TCK-${Math.floor(1000 + Math.random() * 9000)}`;
-    const now = new Date();
-    const timeStr = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
-
-    const newContact: Contact = {
-      id: `c-sim-${Date.now()}`,
-      name: clientName,
-      avatar: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=150&q=80',
-      email: `${clientName.toLowerCase().replace(/\s+/g, '.')}@gmail.com`,
-      phone: '+55 11 98991-0022',
-      company: 'Empresa do Cliente',
-      city: 'São Paulo, SP',
-      tags: ['Novo Lead', 'Simulação'],
-      ltv: 'R$ 0,00',
-      totalTickets: 1,
-      internalNotes: 'Ticket iniciado via Simulador do Cliente.',
-      createdAt: 'Hoje',
-    };
-
-    const newTicket: Ticket = {
-      id: newTicketId,
-      contactId: newContact.id,
-      contact: newContact,
-      channel,
-      status: 'open',
-      priority: 'high',
-      subject: text.slice(0, 48) + '...',
-      assignedAgent: currentAgent,
-      createdAt: `Hoje, ${timeStr}`,
-      updatedAt: 'Agora mesmo',
-      unreadCount: 1,
-      lastMessage: text,
-      lastMessageTime: timeStr,
-    };
-
-    const initialClientMessage: Message = {
-      id: `m-sim-${Date.now()}`,
-      ticketId: newTicketId,
-      sender: 'client',
-      senderName: clientName,
-      content: text,
-      timestamp: timeStr,
-      status: 'delivered',
-    };
-
-    setTickets(prev => [newTicket, ...prev]);
-    setMessagesMap(prev => ({
-      ...prev,
-      [newTicketId]: [initialClientMessage],
-    }));
-    setSelectedTicketId(newTicketId);
-    setCurrentTab('inbox');
-  };
-
-  // Filtered tickets
-  const filteredTickets = tickets.filter(ticket => {
-    // Channel filter
-    if (channelFilter !== 'all' && ticket.channel !== channelFilter) return false;
-
-    // Status filter
-    if (statusFilter === 'mine' && ticket.assignedAgent.id !== currentAgent.id) return false;
-    if (statusFilter === 'unassigned' && ticket.status === 'resolved') return false;
-    if (statusFilter === 'resolved' && ticket.status !== 'resolved') return false;
-
-    // Search query
-    if (searchQuery.trim()) {
-      const q = searchQuery.toLowerCase();
-      const matchName = ticket.contact.name.toLowerCase().includes(q);
-      const matchSubject = ticket.subject.toLowerCase().includes(q);
-      const matchCompany = ticket.contact.company.toLowerCase().includes(q);
-      const matchId = ticket.id.toLowerCase().includes(q);
-      if (!matchName && !matchSubject && !matchCompany && !matchId) return false;
+  // Atualizar Status do Ticket (Open, Pending, Resolved)
+  const handleUpdateStatus = async (ticketId: string, status: Ticket['status']) => {
+    try {
+      const updatedTicket = await api.updateTicketStatus(ticketId, status);
+      setTickets(prev => prev.map(t => t.id === ticketId ? { ...t, status: updatedTicket.status } : t));
+      api.getAnalytics().then(setAnalyticsData).catch(() => {});
+    } catch (err) {
+      console.error('Erro ao atualizar status na API:', err);
+      setTickets(prev => prev.map(t => t.id === ticketId ? { ...t, status } : t));
     }
+  };
 
-    return true;
-  });
+  // Atribuir Agente Responsável
+  const handleAssignAgent = async (ticketId: string, agent: Agent) => {
+    try {
+      const updated = await api.assignAgent(ticketId, agent.id);
+      setTickets(prev => prev.map(t => t.id === ticketId ? { ...t, assignedAgent: updated.assignedAgent } : t));
+    } catch (err) {
+      console.error('Erro ao atribuir agente na API:', err);
+      setTickets(prev => prev.map(t => t.id === ticketId ? { ...t, assignedAgent: agent } : t));
+    }
+  };
+
+  // Atualizar Tags do Contato no SQLite
+  const handleUpdateTags = async (contactId: string, tags: string[]) => {
+    try {
+      const updatedContact = await api.updateContact(contactId, { tags });
+      setTickets(prev => prev.map(t => {
+        if (t.contact.id === contactId) {
+          return {
+            ...t,
+            contact: { ...t.contact, tags: updatedContact.tags },
+          };
+        }
+        return t;
+      }));
+    } catch (err) {
+      console.error('Erro ao atualizar tags na API:', err);
+    }
+  };
+
+  // Atualizar Notas Internas do Contato no SQLite
+  const handleUpdateNotes = async (contactId: string, notes: string) => {
+    try {
+      const updatedContact = await api.updateContact(contactId, { internalNotes: notes });
+      setTickets(prev => prev.map(t => {
+        if (t.contact.id === contactId) {
+          return {
+            ...t,
+            contact: { ...t.contact, internalNotes: updatedContact.internalNotes },
+          };
+        }
+        return t;
+      }));
+    } catch (err) {
+      console.error('Erro ao atualizar notas do contato na API:', err);
+    }
+  };
+
+  // Disparo de mensagem externa via Webhook Real (WhatsApp Bridge / Widget)
+  const handleSimulateClientMessage = async (channel: Channel, clientName: string, text: string) => {
+    try {
+      const webhookResponse = await api.simulateClientMessage(channel, clientName, text);
+      const convId = webhookResponse?.result?.conversationId;
+
+      // Recarrega conversas do banco relacional
+      const updatedList = await api.getConversations();
+      setTickets(updatedList);
+
+      if (convId) {
+        setSelectedTicketId(convId);
+        await fetchSelectedTicketMessages(convId);
+      } else if (updatedList.length > 0) {
+        setSelectedTicketId(updatedList[0].id);
+        await fetchSelectedTicketMessages(updatedList[0].id);
+      }
+
+      setCurrentTab('inbox');
+      api.getAnalytics().then(setAnalyticsData).catch(() => {});
+    } catch (err) {
+      console.error('Erro ao simular webhook de cliente:', err);
+    }
+  };
 
   const unreadTotal = tickets.reduce((acc, t) => acc + (t.unreadCount || 0), 0);
 
@@ -229,11 +283,11 @@ export default function App() {
         <div className="flex-1 flex overflow-hidden">
           {/* Column 1: Conversations Queue Sidebar */}
           <SidebarConversations
-            tickets={filteredTickets}
+            tickets={tickets}
             selectedTicketId={selectedTicketId}
             onSelectTicket={(id) => {
               setSelectedTicketId(id);
-              // Clear unread count on select
+              // Limpar unread localmente
               setTickets(prev => prev.map(t => t.id === id ? { ...t, unreadCount: 0 } : t));
             }}
             statusFilter={statusFilter}
@@ -251,8 +305,8 @@ export default function App() {
             onSendMessage={handleSendMessage}
             onUpdateStatus={handleUpdateStatus}
             onAssignAgent={handleAssignAgent}
-            cannedResponses={CANNED_RESPONSES}
-            teamAgents={TEAM_AGENTS}
+            cannedResponses={cannedResponses}
+            teamAgents={teamAgents}
           />
 
           {/* Column 3: Contact CRM Profile Sidebar */}
@@ -267,13 +321,13 @@ export default function App() {
 
       {currentTab === 'knowledge' && (
         <KnowledgeBase
-          articles={KNOWLEDGE_ARTICLES}
+          articles={knowledgeArticles}
           onOpenWidget={() => setIsWidgetOpen(true)}
         />
       )}
 
       {currentTab === 'analytics' && (
-        <AnalyticsDashboard tickets={tickets} />
+        <AnalyticsDashboard tickets={tickets} analytics={analyticsData} />
       )}
 
       {/* Interactive Floating Live Client Widget */}

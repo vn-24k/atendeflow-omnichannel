@@ -1,86 +1,109 @@
-# AtendeFlow — Central Corporativa de Atendimento Omnichannel
+# AtendeFlow — Central Corporativa de Atendimento Omnichannel Full-Stack
 
-> Plataforma corporativa para centralização e gestão de conversas multicanal (WhatsApp Oficial, Chat Web, Instagram Direct e E-mail), com colaboração em equipe, notas internas privadas, CRM integrado, Base de Conhecimento pública e telemetria avançada de SLA e CSAT.
+> Plataforma corporativa de atendimento omnichannel de nível sênior (alternativa open-source ao Chatwoot, Intercom e Zendesk), equipada com banco de dados relacional SQLite, backend REST completo, webhooks para WhatsApp Bridge e clientes externos, widget embeddable autônomo, timeline colaborativa com notas internas privadas, CRM 360°, Base de Conhecimento e telemetria analítica de SLA e CSAT.
 
 ---
 
-## 🏛️ Visão Geral & Arquitetura
+## 🏛️ Arquitetura de Produção Full-Stack
 
-O **AtendeFlow** foi desenvolvido para resolver o gargalo crítico de operações de atendimento, vendas e pós-venda. Ele unifica em uma única interface ágil e desktop-grade todas as interações de clientes da empresa, garantindo que nenhum chamado seja esquecido e que o tempo de primeira resposta (FRT) permaneça abaixo de 3 minutos.
+O **AtendeFlow** foi concebido sob rigorosa arquitetura relacional e desacoplada, eliminando qualquer dependência de dados mockados em memória. Todas as mensagens, contatos, conversas e telemetria persistem diretamente no banco de dados SQLite em disco.
 
 ```
                     ┌─────────────────────────────────┐
                     │       ATENDEFLOW PLATFORM       │
-                    │    Inbox Unificada Omnichannel  │
+                    │   React 19 + TypeScript + REST  │
                     └────────────────┬────────────────┘
                                      │
-         ┌───────────────────────────┼───────────────────────────┐
-         ▼                           ▼                           ▼
-┌──────────────────┐       ┌──────────────────┐        ┌──────────────────┐
-│ WHATSAPP OFICIAL │       │ WIDGET CHAT WEB  │        │ INSTAGRAM & MAIL │
-│  Conexão Direta  │       │  Simulador Vivo  │        │  DMs e Suporte   │
-└──────────────────┘       └──────────────────┘        └──────────────────┘
+           ┌─────────────────────────┼─────────────────────────┐
+           ▼                         ▼                         ▼
+┌────────────────────┐    ┌────────────────────┐    ┌────────────────────┐
+│   WHATSAPP BRIDGE  │    │  WIDGET EMBEDDABLE │    │  API REST BACKEND  │
+│ Webhook Porta 5005 │    │    public/widget.js│    │   /api/conversations│
+└──────────┬─────────┘    └──────────┬─────────┘    └──────────┬─────────┘
+           │                         │                         │
+           └─────────────────────────┼─────────────────────────┘
+                                     ▼
+                    ┌─────────────────────────────────┐
+                    │    BANCO DE DADOS RELACIONAL    │
+                    │   SQLite Nativo com Foreign Keys │
+                    │ inboxes, contacts, conversations│
+                    │ messages, canned, articles, etc │
+                    └─────────────────────────────────┘
 ```
 
 ---
 
-## ⚡ Recursos de Engenharia
+## ⚡ Recursos de Engenharia & Backend
 
-1. **Inbox Unificada Multicanal:**
-   - Visualização em tempo real de filas de atendimento com abas (`Minhas`, `Não Atribuídas`, `Todas`, `Resolvidas`).
-   - Identificação visual instantânea por canal: WhatsApp (verde), Chat do Site (azul), Instagram Direct (roxo) e E-mail (âmbar).
-   - Indicadores de prioridade (`Urgente`, `Alta`, `Normal`) e contadores de mensagens não lidas.
+### 1. Banco de Dados Relacional Real (SQLite)
+- Tabelas com integridade referencial estrita (`FOREIGN KEY ... REFERENCES`):
+  - `inboxes`: canais de entrada e webhooks associados.
+  - `contacts`: perfil CRM com telefone, e-mail, LTV, tags dinâmicas e notas internas.
+  - `agents`: operadores e supervisores com status operacional (`online`, `busy`, `away`, `offline`).
+  - `conversations`: tickets multicanal com SLA, prioridade, operador responsável e contadores não lidos.
+  - `messages`: histórico de mensagens públicas e notas internas privadas destacadas.
+  - `canned_responses`: macros de respostas rápidas categorizadas.
+  - `knowledge_articles`: artigos da central de ajuda pública com contadores de views e utilidade.
+- Índices otimizados por `status`, `channel`, `contact_id` e `conversation_id`.
 
-2. **Timeline de Chat com Notas Internas Privadas:**
-   - Mensagens públicas com status de entregue e lido.
-   - **Modo Colaborativo de Equipe:** Alternância para *Nota Interna Privada* (balão âmbar com cadeado), visível exclusivamente para atendentes e supervisores, sem que o cliente veja no WhatsApp ou web.
-   - Envio de anexos (propostas comerciais, notas fiscais e comprovantes em PDF).
+### 2. Endpoints da API REST
+- `GET /api/conversations`: Listagem de conversas com filtros relacionais de status (`all`, `mine`, `unassigned`, `resolved`), canal e busca por texto.
+- `GET /api/conversations/:id`: Detalhes da conversa com suas mensagens ordenadas cronologicamente e ficha CRM.
+- `POST /api/conversations/:id/messages`: Gravação de nova mensagem pública com atualização atômica de `last_message` e timestamp.
+- `POST /api/conversations/:id/notes`: Gravação de notas internas confidenciais (invisíveis para clientes).
+- `PATCH /api/conversations/:id/status`: Transição de status do chamado (`open` -> `pending` -> `resolved`).
+- `PATCH /api/conversations/:id/assign`: Atribuição de atendente responsável.
+- `POST /api/webhooks/whatsapp`: Webhook pronto para receber mensagens do WhatsApp Bridge local (porta 5005) ou Evolution API, criando contatos e tickets automaticamente.
+- `POST /api/webhooks/widget`: Webhook para o Widget de Chat embeddable externo.
+- `GET /api/reports/analytics`: Telemetria em tempo real calculada direto do banco (FRT, MTTR, CSAT, taxa de resolução e distribuição de canais).
+- `GET & POST /api/canned-responses`: Gerenciamento de respostas prontas.
+- `GET /api/knowledge-articles`: Artigos da base de conhecimento.
+- `PATCH /api/contacts/:id`: Atualização de tags e notas do CRM.
 
-3. **Macros & Respostas Rápidas (Canned Responses):**
-   - Inserção de respostas pré-programadas com um clique ou via atalho (`/pix`, `/horario`, `/boasvindas`, `/sla`).
-
-4. **CRM 360° do Cliente Integrado:**
-   - Ficha completa com dados cadastrais, telefone com link direto para WhatsApp, e-mail, empresa e cidade.
-   - Gestão dinâmica de tags de segmentação (`VIP`, `Lead Quente`, `Contrato Pro`).
-   - Cálculo de LTV e histórico acumulado de atendimentos.
-   - Bloco de anotações internas com persistência automática.
-
-5. **Simulador Interativo do Cliente:**
-   - Widget flutuante que permite simular em tempo real o envio de mensagens como cliente final, testando a entrada do chamado na fila do operador.
-
-6. **Central de Ajuda Pública (Knowledge Base):**
-   - Base de conhecimento categorizada (Primeiros Passos, Faturamento, Integrações, Segurança).
-   - Busca instantânea por palavras-chave com artigos completos e cálculo de leitura.
-
-7. **Dashboard Executivo de Métricas & SLA:**
-   - Monitoramento de Tempo Médio de Primeira Resposta (FRT), Tempo Médio de Resolução (MTTR) e Índice de Satisfação (CSAT).
-   - Gráficos de distribuição percentual de tráfego por canal.
-   - Tabela de produtividade individual por atendente.
+### 3. Widget Embeddable Autônomo (`public/widget.js`)
+Script em JavaScript Vanilla ultra-leve, sem dependências externas, que pode ser incorporado em qualquer página HTML, WordPress, Shopify ou React:
+```html
+<script src="https://atendeflow-swart.vercel.app/widget.js" data-title="Suporte Oficial" data-primary-color="#4F46E5" async></script>
+```
+- Janela flutuante moderna com histórico persistido na sessão do visitante.
+- Comunicação direta via API REST com o AtendeFlow.
+- Polling inteligente para receber respostas do atendente em tempo real.
+- Página demonstrativa pronta disponível em `/widget-demo.html`.
 
 ---
 
 ## 🛠️ Stack Tecnológica
 
-- **Framework:** React 19 + TypeScript
-- **Bundler & Build Tool:** Vite 6
-- **Estilização:** Tailwind CSS v4
-- **Ícones & Microinterações:** Lucide React & Framer Motion
-- **Tipografia:** Plus Jakarta Sans & Cabinet Grotesk
-- **Deploy:** Vercel (Edge Network)
+- **Frontend:** React 19, TypeScript, Tailwind CSS v4, Lucide React, Framer Motion
+- **Backend:** Node.js Serverless / Standalone HTTP Router
+- **Banco de Dados:** SQLite nativo com Foreign Keys e persistência relacional
+- **Build & Dev:** Vite 6 com plugin de middleware de API integrado
+- **Deploy:** Vercel (Edge & Serverless Functions) + GitHub CI/CD
 
 ---
 
 ## 🚀 Como Executar Localmente
 
 ```bash
-# Instalar dependências
+# 1. Instalar dependências
 npm install
 
-# Iniciar servidor de desenvolvimento
+# 2. Iniciar servidor de desenvolvimento integrado (Frontend + API + SQLite)
 npm run dev
 
-# Compilar para produção
+# 3. Executar servidor de produção standalone
 npm run build
+npm start
+```
+
+---
+
+## 🧪 Testes Automatizados de Integração
+
+A aplicação conta com uma suíte de testes de integração profunda que valida todos os endpoints da API REST e a integridade relacional do SQLite:
+
+```bash
+node tests/integration_test.js
 ```
 
 ---
