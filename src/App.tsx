@@ -118,6 +118,40 @@ export default function App() {
     }
   }, [selectedTicketId, fetchSelectedTicketMessages]);
 
+  // Polling contínuo em background (4s) para sincronização omnichannel em tempo real sem F5
+  useEffect(() => {
+    if (currentTab !== 'inbox') return;
+
+    const interval = setInterval(async () => {
+      try {
+        const [updatedConvs, currentFullTicket, updatedAnalytics] = await Promise.all([
+          api.getConversations({
+            status: statusFilter,
+            channel: channelFilter,
+            search: searchQuery,
+            agentId: currentAgent.id,
+          }),
+          selectedTicketId ? api.getConversationById(selectedTicketId).catch(() => null) : null,
+          api.getAnalytics().catch(() => null),
+        ]);
+
+        setTickets(updatedConvs);
+        if (updatedAnalytics) setAnalyticsData(updatedAnalytics);
+
+        if (currentFullTicket && selectedTicketId && Array.isArray(currentFullTicket.messages)) {
+          setMessagesMap(prev => ({
+            ...prev,
+            [selectedTicketId]: currentFullTicket.messages,
+          }));
+        }
+      } catch {
+        // Silêncio em caso de oscilação transitória
+      }
+    }, 4000);
+
+    return () => clearInterval(interval);
+  }, [currentTab, statusFilter, channelFilter, searchQuery, currentAgent.id, selectedTicketId]);
+
   // Selected Ticket & Contact
   const selectedTicket = tickets.find(t => t.id === selectedTicketId) || null;
   const currentMessages = selectedTicketId ? (messagesMap[selectedTicketId] || []) : [];
@@ -265,6 +299,13 @@ export default function App() {
 
   const unreadTotal = tickets.reduce((acc, t) => acc + (t.unreadCount || 0), 0);
 
+  const ticketCounts = {
+    total: analyticsData?.totalTickets ?? tickets.length,
+    mine: tickets.filter(t => t.assignedAgent?.id === currentAgent.id && t.status !== 'resolved').length,
+    unassigned: analyticsData?.openTickets ?? tickets.filter(t => t.status === 'open' && t.unreadCount > 0).length,
+    resolved: analyticsData?.resolvedTickets ?? tickets.filter(t => t.status === 'resolved').length,
+  };
+
   return (
     <div className="min-h-screen bg-[#F8FAFC] flex flex-col font-sans">
       {/* Top Main Navigation Header */}
@@ -296,6 +337,8 @@ export default function App() {
             setChannelFilter={setChannelFilter}
             searchQuery={searchQuery}
             setSearchQuery={setSearchQuery}
+            currentAgent={currentAgent}
+            ticketCounts={ticketCounts}
           />
 
           {/* Column 2: Central Chat & Timeline Area */}

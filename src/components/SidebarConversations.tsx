@@ -10,7 +10,7 @@ import {
   CheckCheck,
   AlertCircle
 } from 'lucide-react';
-import { Ticket, Channel, TicketStatus } from '../types';
+import { Ticket, Channel, TicketStatus, Agent } from '../types';
 
 interface SidebarConversationsProps {
   tickets: Ticket[];
@@ -22,6 +22,13 @@ interface SidebarConversationsProps {
   setChannelFilter: (channel: Channel | 'all') => void;
   searchQuery: string;
   setSearchQuery: (query: string) => void;
+  currentAgent?: Agent;
+  ticketCounts?: {
+    total: number;
+    mine: number;
+    unassigned: number;
+    resolved: number;
+  };
 }
 
 export const SidebarConversations: React.FC<SidebarConversationsProps> = ({
@@ -34,6 +41,8 @@ export const SidebarConversations: React.FC<SidebarConversationsProps> = ({
   setChannelFilter,
   searchQuery,
   setSearchQuery,
+  currentAgent,
+  ticketCounts,
 }) => {
   // Helper for channel badges
   const renderChannelIcon = (channel: Channel) => {
@@ -101,7 +110,7 @@ export const SidebarConversations: React.FC<SidebarConversationsProps> = ({
                 : 'text-slate-600 hover:bg-slate-100'
             }`}
           >
-            Todas ({tickets.length})
+            Todas ({ticketCounts ? ticketCounts.total : tickets.length})
           </button>
           <button
             onClick={() => setStatusFilter('mine')}
@@ -111,7 +120,7 @@ export const SidebarConversations: React.FC<SidebarConversationsProps> = ({
                 : 'text-slate-600 hover:bg-slate-100'
             }`}
           >
-            Minhas ({tickets.filter(t => t.assignedAgent.id === 'agent-1' && t.status !== 'resolved').length})
+            Minhas ({ticketCounts ? ticketCounts.mine : tickets.filter(t => t.assignedAgent?.id === (currentAgent?.id || 'agent-1') && t.status !== 'resolved').length})
           </button>
           <button
             onClick={() => setStatusFilter('unassigned')}
@@ -121,7 +130,7 @@ export const SidebarConversations: React.FC<SidebarConversationsProps> = ({
                 : 'text-slate-600 hover:bg-slate-100'
             }`}
           >
-            Fila ({tickets.filter(t => t.status === 'open' && t.unreadCount > 0).length})
+            Fila ({ticketCounts ? ticketCounts.unassigned : tickets.filter(t => t.status === 'open' && t.unreadCount > 0).length})
           </button>
           <button
             onClick={() => setStatusFilter('resolved')}
@@ -131,7 +140,7 @@ export const SidebarConversations: React.FC<SidebarConversationsProps> = ({
                 : 'text-slate-600 hover:bg-slate-100'
             }`}
           >
-            Resolvidas
+            Resolvidas {ticketCounts ? `(${ticketCounts.resolved})` : ''}
           </button>
         </div>
 

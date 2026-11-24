@@ -83,18 +83,25 @@ export async function handleApiRequest(req, res) {
         return sendJson(res, 400, { success: false, error: 'Conteúdo da mensagem é obrigatório.' });
       }
 
-      const newMsg = db.addMessage({
-        conversationId: convId,
-        sender: body.sender || 'agent',
-        senderName: body.senderName || 'Operador AtendeFlow',
-        content: body.content,
-        timestamp: body.timestamp,
-        isInternalNote: false,
-        attachment: body.attachment || null,
-        status: body.status || 'delivered',
-      });
+      try {
+        const newMsg = db.addMessage({
+          conversationId: convId,
+          sender: body.sender || 'agent',
+          senderName: body.senderName || 'Operador AtendeFlow',
+          content: body.content.trim(),
+          timestamp: body.timestamp,
+          isInternalNote: false,
+          attachment: body.attachment || null,
+          status: body.status || 'delivered',
+        });
 
-      return sendJson(res, 201, { success: true, data: newMsg });
+        return sendJson(res, 201, { success: true, data: newMsg });
+      } catch (err) {
+        if (err.code === 'CONVERSATION_NOT_FOUND') {
+          return sendJson(res, 404, { success: false, error: 'Conversa não encontrada.' });
+        }
+        throw err;
+      }
     }
 
     // 4. POST /api/conversations/:id/notes
@@ -106,18 +113,25 @@ export async function handleApiRequest(req, res) {
         return sendJson(res, 400, { success: false, error: 'Conteúdo da nota interna é obrigatório.' });
       }
 
-      const newNote = db.addMessage({
-        conversationId: convId,
-        sender: 'agent',
-        senderName: body.senderName || 'Operador AtendeFlow',
-        content: body.content,
-        timestamp: body.timestamp,
-        isInternalNote: true,
-        attachment: null,
-        status: 'delivered',
-      });
+      try {
+        const newNote = db.addMessage({
+          conversationId: convId,
+          sender: 'agent',
+          senderName: body.senderName || 'Operador AtendeFlow',
+          content: body.content.trim(),
+          timestamp: body.timestamp,
+          isInternalNote: true,
+          attachment: null,
+          status: 'delivered',
+        });
 
-      return sendJson(res, 201, { success: true, data: newNote });
+        return sendJson(res, 201, { success: true, data: newNote });
+      } catch (err) {
+        if (err.code === 'CONVERSATION_NOT_FOUND') {
+          return sendJson(res, 404, { success: false, error: 'Conversa não encontrada.' });
+        }
+        throw err;
+      }
     }
 
     // 5. PATCH /api/conversations/:id/status
@@ -129,8 +143,18 @@ export async function handleApiRequest(req, res) {
         return sendJson(res, 400, { success: false, error: 'Status é obrigatório.' });
       }
 
-      const updated = db.updateConversationStatus(convId, body.status);
-      return sendJson(res, 200, { success: true, data: updated });
+      try {
+        const updated = db.updateConversationStatus(convId, body.status);
+        if (!updated) {
+          return sendJson(res, 404, { success: false, error: 'Conversa não encontrada.' });
+        }
+        return sendJson(res, 200, { success: true, data: updated });
+      } catch (err) {
+        if (err.code === 'INVALID_STATUS') {
+          return sendJson(res, 400, { success: false, error: err.message });
+        }
+        throw err;
+      }
     }
 
     // 6. PATCH /api/conversations/:id/assign
@@ -142,22 +166,40 @@ export async function handleApiRequest(req, res) {
         return sendJson(res, 400, { success: false, error: 'agentId é obrigatório.' });
       }
 
-      const updated = db.updateConversationAssignee(convId, body.agentId);
-      return sendJson(res, 200, { success: true, data: updated });
+      try {
+        const updated = db.updateConversationAssignee(convId, body.agentId);
+        if (!updated) {
+          return sendJson(res, 404, { success: false, error: 'Conversa não encontrada.' });
+        }
+        return sendJson(res, 200, { success: true, data: updated });
+      } catch (err) {
+        if (err.code === 'AGENT_NOT_FOUND') {
+          return sendJson(res, 404, { success: false, error: err.message });
+        }
+        throw err;
+      }
     }
 
     // 7. POST /api/webhooks/whatsapp
     if (method === 'POST' && pathname === '/api/webhooks/whatsapp') {
       const body = await parseBody(req);
-      const result = db.handleWhatsAppWebhook(body);
-      return sendJson(res, 200, { success: true, result });
+      try {
+        const result = db.handleWhatsAppWebhook(body);
+        return sendJson(res, 200, { success: true, result });
+      } catch (err) {
+        return sendJson(res, 400, { success: false, error: err.message });
+      }
     }
 
     // 8. POST /api/webhooks/widget
     if (method === 'POST' && pathname === '/api/webhooks/widget') {
       const body = await parseBody(req);
-      const result = db.handleWidgetWebhook(body);
-      return sendJson(res, 201, { success: true, result });
+      try {
+        const result = db.handleWidgetWebhook(body);
+        return sendJson(res, 201, { success: true, result });
+      } catch (err) {
+        return sendJson(res, 400, { success: false, error: err.message });
+      }
     }
 
     // 9. GET /api/reports/analytics

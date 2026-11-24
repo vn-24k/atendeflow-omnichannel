@@ -131,6 +131,55 @@ async function runTests() {
     const rKA = await fetchApi('/api/knowledge-articles');
     assert(rKA.status === 200 && Array.isArray(rKA.data.data) && rKA.data.data.length >= 4, 'GET /api/knowledge-articles');
 
+    // 15. [Resiliência & Edge Case] POST mensagem em conversa inexistente -> 404
+    const rMsgNotFound = await fetchApi('/api/conversations/TCK-INEXISTENTE-9999/messages', {
+      method: 'POST',
+      body: JSON.stringify({ content: 'Esta mensagem não deve ser aceita.' }),
+    });
+    assert(rMsgNotFound.status === 404, 'POST /api/conversations/INEXISTENTE/messages -> 404 Not Found');
+
+    // 16. [Resiliência & Edge Case] POST mensagem com conteúdo vazio -> 400
+    const rMsgEmpty = await fetchApi('/api/conversations/TCK-1042/messages', {
+      method: 'POST',
+      body: JSON.stringify({ content: '   ' }),
+    });
+    assert(rMsgEmpty.status === 400, 'POST /api/conversations/:id/messages vazio -> 400 Bad Request');
+
+    // 17. [Resiliência & Edge Case] PATCH status em conversa inexistente -> 404
+    const rStatusNotFound = await fetchApi('/api/conversations/TCK-INEXISTENTE-9999/status', {
+      method: 'PATCH',
+      body: JSON.stringify({ status: 'resolved' }),
+    });
+    assert(rStatusNotFound.status === 404, 'PATCH /api/conversations/INEXISTENTE/status -> 404 Not Found');
+
+    // 18. [Resiliência & Edge Case] PATCH status inválido -> 400
+    const rStatusInvalid = await fetchApi('/api/conversations/TCK-1042/status', {
+      method: 'PATCH',
+      body: JSON.stringify({ status: 'status_invalido_xyz' }),
+    });
+    assert(rStatusInvalid.status === 400, 'PATCH /api/conversations/:id/status inválido -> 400 Bad Request');
+
+    // 19. [Resiliência & Edge Case] PATCH assign com agente inexistente -> 404
+    const rAssignNotFound = await fetchApi('/api/conversations/TCK-1042/assign', {
+      method: 'PATCH',
+      body: JSON.stringify({ agentId: 'agente-fantasma-999' }),
+    });
+    assert(rAssignNotFound.status === 404, 'PATCH /api/conversations/:id/assign com agente inexistente -> 404');
+
+    // 20. [Resiliência & Edge Case] POST webhook WhatsApp com payload vazio -> 400
+    const rWaEmpty = await fetchApi('/api/webhooks/whatsapp', {
+      method: 'POST',
+      body: JSON.stringify({}),
+    });
+    assert(rWaEmpty.status === 400, 'POST /api/webhooks/whatsapp inválido -> 400 Bad Request');
+
+    // 21. [Resiliência & Edge Case] POST webhook Widget com mensagem vazia -> 400
+    const rWidgetEmpty = await fetchApi('/api/webhooks/widget', {
+      method: 'POST',
+      body: JSON.stringify({ message: '  ' }),
+    });
+    assert(rWidgetEmpty.status === 400, 'POST /api/webhooks/widget vazio -> 400 Bad Request');
+
     console.log(`\n========================================`);
     console.log(`RESULTADO FINAL DOS TESTES: ${passed} passaram, ${failed} falharam.`);
     console.log(`========================================\n`);

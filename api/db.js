@@ -407,6 +407,15 @@ function seedDatabaseIfEmpty() {
 // Inicializar semente
 seedDatabaseIfEmpty();
 
+// Gerador de ID de conversa único e determinístico sem colisões
+export function generateTicketId() {
+  while (true) {
+    const candidate = `TCK-${Math.floor(1000 + Math.random() * 90000)}`;
+    const exists = db.prepare('SELECT id FROM conversations WHERE id = ?').get(candidate);
+    if (!exists) return candidate;
+  }
+}
+
 // --- MÉTODOS DE REPOSITÓRIO E SERVIÇO ---
 
 export function getConversations({ status = 'all', channel = 'all', search = '', agentId = null } = {}) {
@@ -431,11 +440,15 @@ export function getConversations({ status = 'all', channel = 'all', search = '',
   if (status && status !== 'all') {
     if (status === 'resolved') {
       query += ` AND c.status = 'resolved'`;
-    } else if (status === 'mine' && agentId) {
-      query += ` AND c.assigned_agent_id = ? AND c.status != 'resolved'`;
-      params.push(agentId);
+    } else if (status === 'mine') {
+      if (agentId) {
+        query += ` AND c.assigned_agent_id = ? AND c.status != 'resolved'`;
+        params.push(agentId);
+      } else {
+        query += ` AND c.assigned_agent_id IS NOT NULL AND c.assigned_agent_id != '' AND c.status != 'resolved'`;
+      }
     } else if (status === 'unassigned') {
-      query += ` AND (c.assigned_agent_id IS NULL OR c.assigned_agent_id = '') AND c.status != 'resolved'`;
+      query += ` AND (c.assigned_agent_id IS NULL OR c.assigned_agent_id = '' OR c.assigned_agent_id = 'agent-unassigned') AND c.status != 'resolved'`;
     } else if (status === 'open' || status === 'pending') {
       query += ` AND c.status = ?`;
       params.push(status);
@@ -571,6 +584,14 @@ export function getConversationById(id) {
 }
 
 export function addMessage({ conversationId, sender, senderName, content, timestamp, isInternalNote = false, attachment = null, status = 'delivered' }) {
+  // Validação: verificar se a conversa existe antes de tentar inserir
+  const conv = db.prepare('SELECT id FROM conversations WHERE id = ?').get(conversationId);
+  if (!conv) {
+    const err = new Error(`Conversa não encontrada: ${conversationId}`);
+    err.code = 'CONVERSATION_NOT_FOUND';
+    throw err;
+  }
+
   const msgId = `m-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
   const now = new Date();
   const timeStr = timestamp || `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
@@ -617,6 +638,18 @@ export function addMessage({ conversationId, sender, senderName, content, timest
 }
 
 export function updateConversationStatus(id, status) {
+  const validStatuses = ['open', 'pending', 'resolved'];
+  if (!validStatuses.includes(status)) {
+    const err = new Error(`Status inválido: "${status}". Valores aceitos: open, pending, resolved.`);
+    err.code = 'INVALID_STATUS';
+    throw err;
+  }
+
+  const conv = db.prepare('SELECT id FROM conversations WHERE id = ?').get(id);
+  if (!conv) {
+    return null;
+  }
+
   db.prepare(`
     UPDATE conversations
     SET status = ?, updated_at = 'Agora mesmo'
@@ -626,6 +659,18 @@ export function updateConversationStatus(id, status) {
 }
 
 export function updateConversationAssignee(id, agentId) {
+  const conv = db.prepare('SELECT id FROM conversations WHERE id = ?').get(id);
+  if (!conv) {
+    return null;
+  }
+
+  const agent = db.prepare('SELECT id FROM agents WHERE id = ?').get(agentId);
+  if (!agent) {
+    const err = new Error(`Agente com ID "${agentId}" não encontrado.`);
+    err.code = 'AGENT_NOT_FOUND';
+    throw err;
+  }
+
   db.prepare(`
     UPDATE conversations
     SET assigned_agent_id = ?, updated_at = 'Agora mesmo'
@@ -652,11 +697,13 @@ export function handleWhatsAppWebhook(payload) {
   let messageText = '';
 
   if (payload.event === 'messages.upsert' && payload.data) {
-    // Formato Evolution API
-    const item = payload.data;
-    senderPhone = item.key?.remoteJid?.split('@')[0] || '';
-    senderName = item.pushName || `WhatsApp ${senderPhone.slice(-4)}`;
-    messageText = item.message?.conversation || item.message?.extendedTextMessage?.text || '';
+    // Formato Evolution API (trata tanto objeto quanto array)
+    const item = Array.isArray(payload.data) 
+      ? payload.data[0] 
+      : (payload.data.messages ? payload.data.messages[0] : payload.data);
+    senderPhone = item?.key?.remoteJid?.split('@')[0] || '';
+    senderName = item?.pushName || `WhatsApp ${senderPhone ? senderPhone.slice(-4) : 'User'}`;
+    messageText = item?.message?.conversation || item?.message?.extendedTextMessage?.text || '';
   } else if (payload.sender && (payload.text || payload.content)) {
     // Formato WhatsApp Bridge local
     senderPhone = String(payload.sender).replace(/\D/g, '');
@@ -669,14 +716,16 @@ export function handleWhatsAppWebhook(payload) {
     messageText = payload.message;
   }
 
-  if (!senderPhone || !messageText) {
-    throw new Error('Payload inválido para Webhook WhatsApp. Campos sender/phone e message/text são obrigatórios.');
+  if (!senderPhone || !messageText || !messageText.trim()) {
+    const err = new Error('Payload inválido para Webhook WhatsApp. Campos sender/phone e message/text são obrigatórios.');
+    err.code = 'INVALID_PAYLOAD';
+    throw err;
   }
 
   // 1. Localizar ou criar contato
   let contact = db.prepare('SELECT * FROM contacts WHERE phone LIKE ?').get(`%${senderPhone.slice(-8)}%`);
   if (!contact) {
-    const contactId = `c-wa-${Date.now()}`;
+    const contactId = `c-wa-${Date.now()}-${Math.floor(Math.random() * 10000)}`;
     const formattedPhone = senderPhone.startsWith('+') ? senderPhone : `+${senderPhone}`;
     db.prepare(`
       INSERT INTO contacts (id, name, avatar, email, phone, company, city, tags, ltv, total_tickets, internal_notes, created_at)
@@ -709,7 +758,7 @@ export function handleWhatsAppWebhook(payload) {
   const timeStr = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
 
   if (!conversation) {
-    const convId = `TCK-${Math.floor(1000 + Math.random() * 9000)}`;
+    const convId = generateTicketId();
     db.prepare(`
       INSERT INTO conversations (id, contact_id, inbox_id, channel, status, priority, subject, assigned_agent_id, unread_count, last_message, last_message_time, csat_rating, created_at, updated_at)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -723,7 +772,7 @@ export function handleWhatsAppWebhook(payload) {
       `Mensagem recebida via WhatsApp (${senderName})`,
       'agent-1',
       1,
-      messageText,
+      messageText.trim(),
       timeStr,
       null,
       'Hoje, ' + timeStr,
@@ -735,7 +784,7 @@ export function handleWhatsAppWebhook(payload) {
       UPDATE conversations
       SET unread_count = unread_count + 1, last_message = ?, last_message_time = ?, updated_at = 'Agora mesmo'
       WHERE id = ?
-    `).run(messageText, timeStr, conversation.id);
+    `).run(messageText.trim(), timeStr, conversation.id);
   }
 
   // 3. Inserir mensagem
@@ -743,7 +792,7 @@ export function handleWhatsAppWebhook(payload) {
     conversationId: conversation.id,
     sender: 'client',
     senderName,
-    content: messageText,
+    content: messageText.trim(),
     timestamp: timeStr,
     isInternalNote: false,
     status: 'delivered',
@@ -760,7 +809,9 @@ export function handleWhatsAppWebhook(payload) {
 // Webhook para Widget Embeddable externo
 export function handleWidgetWebhook({ name, email, phone, message, conversationId, channel = 'webchat' }) {
   if (!message || !message.trim()) {
-    throw new Error('Mensagem é obrigatória.');
+    const err = new Error('Mensagem é obrigatória.');
+    err.code = 'INVALID_PAYLOAD';
+    throw err;
   }
 
   const clientName = (name && name.trim()) || 'Visitante Web';
@@ -777,7 +828,7 @@ export function handleWidgetWebhook({ name, email, phone, message, conversationI
     // Criar ou localizar contato
     let contact = db.prepare('SELECT * FROM contacts WHERE email = ?').get(clientEmail);
     if (!contact) {
-      const contactId = `c-web-${Date.now()}`;
+      const contactId = `c-web-${Date.now()}-${Math.floor(Math.random() * 10000)}`;
       db.prepare(`
         INSERT INTO contacts (id, name, avatar, email, phone, company, city, tags, ltv, total_tickets, internal_notes, created_at)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -798,7 +849,7 @@ export function handleWidgetWebhook({ name, email, phone, message, conversationI
       contact = db.prepare('SELECT * FROM contacts WHERE id = ?').get(contactId);
     }
 
-    convId = `TCK-${Math.floor(1000 + Math.random() * 9000)}`;
+    convId = generateTicketId();
     db.prepare(`
       INSERT INTO conversations (id, contact_id, inbox_id, channel, status, priority, subject, assigned_agent_id, unread_count, last_message, last_message_time, csat_rating, created_at, updated_at)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -812,25 +863,27 @@ export function handleWidgetWebhook({ name, email, phone, message, conversationI
       `Conversa aberta via Widget Webchat (${clientName})`,
       'agent-1',
       1,
-      message,
+      message.trim(),
       timeStr,
       null,
       'Hoje, ' + timeStr,
       'Agora mesmo'
     );
   } else {
+    // Reabre conversa caso esteja resolvida
+    const nextStatus = conv.status === 'resolved' ? 'open' : conv.status;
     db.prepare(`
       UPDATE conversations
-      SET unread_count = unread_count + 1, last_message = ?, last_message_time = ?, updated_at = 'Agora mesmo'
+      SET unread_count = unread_count + 1, last_message = ?, last_message_time = ?, status = ?, updated_at = 'Agora mesmo'
       WHERE id = ?
-    `).run(message, timeStr, conv.id);
+    `).run(message.trim(), timeStr, nextStatus, conv.id);
   }
 
   const savedMsg = addMessage({
     conversationId: convId,
     sender: 'client',
     senderName: clientName,
-    content: message,
+    content: message.trim(),
     timestamp: timeStr,
     isInternalNote: false,
     status: 'delivered',

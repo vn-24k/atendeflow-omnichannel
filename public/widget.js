@@ -27,12 +27,13 @@
   const primaryColor = scriptTag?.getAttribute('data-primary-color') || '#4F46E5';
   const widgetTitle = scriptTag?.getAttribute('data-title') || 'AtendeFlow • Suporte';
   const agentName = scriptTag?.getAttribute('data-agent') || 'Atendimento Omnichannel';
+  const configuredClientName = scriptTag?.getAttribute('data-client-name') || 'Visitante Web';
 
   // Estado local do widget
   const STORAGE_KEY = 'atendeflow_widget_session';
   let sessionData = {
     conversationId: null,
-    clientName: 'Visitante Web',
+    clientName: configuredClientName,
     messages: [
       {
         id: 'welcome',
@@ -424,15 +425,27 @@
         // Filtrar apenas mensagens públicas (ignorar notas internas)
         const publicMsgs = json.data.messages.filter(m => !m.isInternalNote);
         if (publicMsgs.length > 0) {
-          sessionData.messages = publicMsgs.map(m => ({
+          const welcomeMsg = sessionData.messages.find(m => m.id === 'welcome');
+          const formatted = publicMsgs.map(m => ({
             id: m.id,
             sender: m.sender,
             senderName: m.senderName,
             content: m.content,
             timestamp: m.timestamp,
           }));
-          saveSession();
-          renderMessages();
+
+          // Preserva a mensagem de boas-vindas inicial no topo
+          const merged = welcomeMsg ? [welcomeMsg, ...formatted] : formatted;
+
+          // Evita renderização redundante se as mensagens não mudaram (anti-flicker)
+          const hasChanged = merged.length !== sessionData.messages.length ||
+            merged.some((m, idx) => m.id !== sessionData.messages[idx]?.id || m.content !== sessionData.messages[idx]?.content);
+
+          if (hasChanged) {
+            sessionData.messages = merged;
+            saveSession();
+            renderMessages();
+          }
         }
       }
     } catch {}
